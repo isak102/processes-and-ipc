@@ -150,11 +150,13 @@ char* position_to_string(position_t pos) {
  * i.
  */
 position_t cmd_position(int i, int n) {
+  // check that i is in range
+  if (i > (n-1) || i < 0) return unknown;
+
   if (i == 0 && n == 1) return single;
-
-  // TODO: Add more cases ...
-
-  return unknown;
+  else if (i == 0) return first;
+  else if (i == n-1) return last;
+  else return middle;
 }
 
 /**
