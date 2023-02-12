@@ -1,6 +1,7 @@
 #include "parser.h"    // cmd_t, position_t, parse_commands()
 
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
@@ -45,18 +46,98 @@ void fork_error() {
   exit(EXIT_FAILURE);
 }
 
+void pipe_error() {
+  perror("pipe() failed)");
+  exit(EXIT_FAILURE);
+}
+
+void dup2_error() {
+  perror("dup2() failed)");
+  exit(EXIT_FAILURE);
+}
+
+
 /**
  *  Fork a proccess for command with index i in the command pipeline. If needed,
  *  create a new pipe and update the in and out members for the command..
  */
 void fork_cmd(int i) {
   pid_t pid;
+  int fd[2];
+  
+  // theres no need for a pipe if we have a single command
+
+  bool create_pipes = (commands[i].pos == first) || (commands[i].pos == middle); 
+  if (create_pipes) {
+    puts("Pipe created");
+    if (pipe(fd) == -1) {
+      pipe_error();
+    }
+  }
 
   switch (pid = fork()) {
     case -1:
       fork_error();
     case 0:
       // Child process after a successful fork().
+      switch(commands[i].pos) {
+        case first:
+          puts("First child");
+          // Close the pipe read descriptor.
+          close(fd[READ]);
+
+          if (dup2(fd[WRITE], commands[i].out) == -1) {
+            dup2_error();
+          }
+          commands[i].out = fd[WRITE];
+          
+          // Close the dangling pipe write descriptor.
+          close(fd[WRITE]);
+          printf("first child closed!\n");
+          break;
+
+        case last:
+          puts("Last child");
+          // Close the pipe read descriptor.
+          close(fd[WRITE]);
+
+          if (dup2(commands[i-1].out, commands[i].in) == -1) {
+            dup2_error();
+          }
+          commands[i].in = commands[i-1].out;
+
+          // Close the dangling pipe read descriptor.
+          close(fd[READ]);
+          // close(commands[i-1].out);
+          printf("last child closed!\n");
+          break;
+
+        case middle:
+          puts("Middle child");
+          printf("fd WRITE %d\n", fd[WRITE]);
+          
+          // Close the pipe read descriptor.
+          close(fd[READ]);
+
+          if (dup2(commands[i-1].out, commands[i].in) == -1) {
+            dup2_error();
+          }
+          if (dup2(fd[WRITE], commands[i].out) == -1) {
+            dup2_error();
+          }
+          commands[i].in = commands[i-1].out;
+          commands[i].out = fd[WRITE];
+
+          // Close both the dangling pipe read and write descriptors.
+          close(fd[WRITE]);
+          printf("middle child closed!\n");
+
+          break;
+        default:
+          // unknown
+          // single
+          break;
+      }
 
       // Execute the command in the contex of the child process.
       execvp(commands[i].argv[0], commands[i].argv);
@@ -67,7 +148,10 @@ void fork_cmd(int i) {
 
     default:
       // Parent process after a successful fork().
-
+      if (create_pipes) {
+        close(fd[READ]);
+        close(fd[WRITE]);
+      }
       break;
   }
 }
@@ -91,10 +175,11 @@ void get_line(char* buffer, size_t size) {
   buffer[strlen(buffer)-1] = '\0';
 }
 
-/**
- * Make the parents wait for all the child processes.
- */
 void wait_for_all_cmds(int n) {
+  for(int i=0; i < n; i++) {
+    wait(NULL);
+    printf("Wait %d finished\n", i);
+  }
   // Not implemented yet!
 }
 
@@ -112,6 +197,7 @@ int main() {
     n = parse_commands(line, commands);
 
     fork_commands(n);
+    // print_commands(n);
 
     wait_for_all_cmds(n);
   }
