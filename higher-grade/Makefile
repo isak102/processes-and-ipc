@@ -1,7 +1,7 @@
 DEBUG=y
 
 CC=gcc
-CFLAGS=-std=gnu99 -Wall
+CFLAGS=-std=gnu99 -g
 LDFLAGS=
 
 ifeq ($DEBUG), y)
@@ -18,7 +18,7 @@ bin/shell: obj/shell.o obj/parser.o
 	$(CC) $^ -o $@
 
 obj/%.o: src/%.c
-	$(CC) -c $(CFLAGS) $< -o $@
+	$(CC) -c -g $(CFLAGS) $< -o $@
 
 clean:
 	$(RM) *~ src/*~ src/#* obj/*.o bin/*
