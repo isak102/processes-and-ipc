@@ -22,7 +22,7 @@ cmd_t commands[MAX_COMMANDS];
 /**
  *  Debug printout of the commands array.
  */
-void print_commands(int n)
+static void print_commands(int n)
 {
   for (int i = 0; i < n; i++)
   {
@@ -38,30 +38,40 @@ void print_commands(int n)
 /**
  * Returns true if file descriptor fd is open. Otherwise returns false.
  */
-int is_open(int fd)
+static int is_open(int fd)
 {
   return fcntl(fd, F_GETFL) != -1 || errno != EBADF;
 }
 
-void fork_error()
+static void fork_error()
 {
   perror("fork() failed)");
   exit(EXIT_FAILURE);
 }
 
-void pipe_error()
+static void pipe_error()
 {
   perror("pipe() failed)");
   exit(EXIT_FAILURE);
 }
 
-void dup2_error()
+static void dup2_error()
 {
   perror("dup2() failed)");
   exit(EXIT_FAILURE);
 }
 
-void redirect_file_descriptors(int *fd, unsigned int command_index)
+
+static void close_pipes(int upper_limit) {
+  for (int i=0; i < upper_limit; i++) {
+    if ((commands[i].pos == first) || (commands[i].pos == middle)) {
+      close(commands[i].fd[READ]);
+      close(commands[i].fd[WRITE]);
+    }
+  }
+}
+
+static void redirect_file_descriptors(int *fd, unsigned int command_index)
 {
   cmd_t *cmd = &commands[command_index];
 
@@ -93,38 +103,44 @@ void redirect_file_descriptors(int *fd, unsigned int command_index)
 
     // Close the dangling pipe read descriptor.
     close(commands[command_index - 1].fd[READ]);
+
+    // Close all the remaining open pipes
+    close_pipes(command_index - 1);
     break;
 
   case middle:
-    //puts("Middle child");
-    //printf("fd WRITE %d\n", fd[WRITE]);
-
     // Close the pipe read descriptor.
     close(fd[READ]);
 
-    if (dup2(commands[command_index - 1].out, cmd->in) == -1)
-    {
-      //puts("Middle child 1");
+    // Close the write end of the previous pipe
+    close(commands[command_index - 1].fd[WRITE]);
 
+    if (dup2(commands[command_index - 1].fd[READ], STDIN_FILENO) == -1)
+    {
       dup2_error();
     }
-    if (dup2(fd[WRITE], cmd->out) == -1)
+    if (dup2(fd[WRITE], STDOUT_FILENO) == -1)
     {
-      //puts("Middle child2 ");
-
       dup2_error();
     }
-    cmd->in = commands[command_index - 1].out;
+    cmd->in = commands[command_index - 1].fd[READ];
     cmd->out = fd[WRITE];
 
     // Close both the dangling pipe read and write descriptors.
+    close(commands[command_index - 1].fd[READ]);
     close(fd[WRITE]);
-    //printf("middle child closed!\n");
+    close_pipes(command_index - 1);
 
     break;
+
+  case single:
+    // We dont need to do anything if its a single process
+    break;
+  
+  case unknown:
   default:
-    // unknown
-    // single
+    fprintf(stderr, "ERROR: Unexpected command position\n");
+    exit(EXIT_FAILURE);
     break;
   }
 }
@@ -133,7 +149,7 @@ void redirect_file_descriptors(int *fd, unsigned int command_index)
  *  Fork a proccess for command with index i in the command pipeline. If needed,
  *  create a new pipe and update the in and out members for the command..
  */
-void fork_cmd(int i)
+static void fork_cmd(int i)
 {
   pid_t pid;
   int fd[2];
@@ -143,7 +159,6 @@ void fork_cmd(int i)
   bool create_pipes = (commands[i].pos == first) || (commands[i].pos == middle);
   if (create_pipes)
   {
-    puts("Pipe created");
     if (pipe(fd) == -1)
     {
       pipe_error();
@@ -173,39 +188,30 @@ void fork_cmd(int i)
   }
 }
 
-void close_all_pipes(int number_of_commands) {
-  for (int i=0; i < number_of_commands; i++) {
-    if ((commands[i].pos == first) || (commands[i].pos == middle)) {
-      close(commands[i].fd[READ]);
-      close(commands[i].fd[WRITE]);
-    }
-  }
-}
-
 /**
  *  Fork one child process for each command in the command pipeline.
  */
-void fork_commands(int n)
+static void fork_commands(int n)
 {
   for (int i = 0; i < n; i++)
   {
     fork_cmd(i);
   }
 
-  close_all_pipes(n);
+  close_pipes(n);
 }
 
 /**
  *  Reads a command line from the user and stores the string in the provided
  *  buffer.
  */
-void get_line(char *buffer, size_t size)
+static void get_line(char *buffer, size_t size)
 {
   getline(&buffer, &size, stdin);
   buffer[strlen(buffer) - 1] = '\0';
 }
 
-void wait_for_all_cmds(int n)
+static void wait_for_all_cmds(int n)
 {
   for (int i = 0; i < n; i++)
   {
