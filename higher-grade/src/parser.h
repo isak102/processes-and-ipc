@@ -17,6 +17,7 @@ typedef struct {
   position_t pos;         // Position within the pipeline (single, first, middle or last).
   int in;                 // Input file descriptor.
   int out;                // Output file descriptor.
+  int fd[2];              // The pipe for this command
 } cmd_t;
 
 /**
